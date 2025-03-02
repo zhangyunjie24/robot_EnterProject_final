@@ -25,6 +25,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
+
 #include "../../bsp/led.h"
 #include "tim.h"
 #include "usart.h"
@@ -56,7 +58,7 @@ uint8_t CAN2_Data[8] = {0};
 float set_speed[4];
 float set_angle[4];
 
-enum {
+enum __mode_t{
   speed_control = 0,
   angle_control
 }control_mode;
@@ -200,7 +202,7 @@ void Start_can1_Task(void *argument)
           case 0x202:
           case 0x203:
           case 0x204:
-            if (moto_chassis[num].msg_cnt <= 50) {  //make little change, forbidden re-offset
+            if (moto_chassis[num].msg_cnt <= 50) {  //make little change, prohibit re-offset
               moto_chassis[num].msg_cnt++;
               get_moto_offset(&moto_chassis[num], CAN1_Data);
             }
@@ -290,30 +292,42 @@ void Start_can1_Task(void *argument)
 void Start_uart6_Task(void *argument)
 {
   /* USER CODE BEGIN Start_uart6_Task */
-  uint8_t Data[2];
+  uint8_t Data[4];
   /* Infinite loop */
   for(;;)
   {
-    /*报文设计：bite1：选择speed control或 angle control mode
+    /*报文设计：
+     *        头：
+     *        0xaa
+     *        数据：
+     *        bite1：选择speed control或 angle control mode
      *        bite2、3: 指定电机
      *        bite4-16：电机角度/速度输出
-     *
+     *        校验：
+     *        校验和
      */
     HAL_UART_Receive(&huart6,Data,sizeof(Data),HAL_MAX_DELAY);
-    control_mode = Data[0] & 0x80 ? speed_control : angle_control;
-    uint8_t motor_num = Data[0] & 0x60;
-    switch(control_mode) {
-      case speed_control: {
-        set_speed[motor_num] = (Data[0] & 0x10 << 11) + (Data[0] & 0xf << 8)+ Data[1];  //第4位表示正负 总速度范围+-4095
+    if (Data[0] == 0xaa && (Data[0] + Data[1] + Data[2]) & 0xff == Data[3]) {
+      control_mode = Data[1] & 0x80 ? speed_control : angle_control;
+      static enum __mode_t last_mode = 2;
+      if (last_mode != control_mode) {  //切换模式时使得moto_chassis重新初始化
+        memset(moto_chassis, 0, sizeof(moto_chassis));
+        last_mode = control_mode;
       }
-      break;
-      case angle_control: {
-        set_angle[motor_num] = (Data[0] & 0x1f << 8)+ Data[1];  //0-8191(360)
-        get_moto_offset(&moto_chassis[motor_num], CAN1_Data);
-        moto_chassis->last_angle = 0;
-        moto_chassis->total_angle = 0;
+      uint8_t motor_num = Data[1] & 0x60;
+      switch(control_mode) {
+        case speed_control: {
+          set_speed[motor_num] = (Data[1] & 0x10 << 11) + (Data[1] & 0xf << 8)+ Data[2];  //第4位表示正负 总速度范围+-4095
+        }
+        break;
+        case angle_control: {
+          set_angle[motor_num] = (Data[1] & 0x1f << 8)+ Data[2];  //0-8191(360)
+        }
+        break;
       }
-      break;
+    }
+    if (Data[0] == 0xaa && (Data[0] + Data[1] + Data[2]) & 0xff != Data[3]) {
+      HAL_UART_Transmit(&huart6,"ERROR",5,HAL_MAX_DELAY);
     }
   }
   /* USER CODE END Start_uart6_Task */

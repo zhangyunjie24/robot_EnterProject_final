@@ -29,7 +29,7 @@ typedef struct{
 
 
 /* Extern  ------------------------------------------------------------------*/
-extern moto_measure_t  moto_chassis[];
+extern moto_measure_t  moto_chassis[4];
 extern moto_measure_t moto_info;
 extern uint8_t CAN1_Data[8];
 extern uint8_t CAN2_Data[8];
